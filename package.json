@@ -1,0 +1,16 @@
+{
+  "name": "foodpicker",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev:frontend": "bun run --cwd apps/frontend dev",
+    "dev:worker": "bun run --cwd apps/worker dev",
+    "dev": "concurrently \"bun run dev:frontend\" \"bun run dev:worker\"",
+    "deploy:worker": "bun run --cwd apps/worker deploy",
+    "deploy:frontend": "bun run --cwd apps/frontend deploy",
+    "deploy": "concurrently \"bun run deploy:frontend\" \"bun run deploy:worker\""
+  }
+}

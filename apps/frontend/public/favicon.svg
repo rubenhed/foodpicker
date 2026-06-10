@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Pin -->
+  <path fill="#f97316"
+    d="M256 48c-93 0-168 75-168 168 0 128 168 248 168 248s168-120 168-248c0-93-75-168-168-168z"/>
+
+  <!-- Inner circle -->
+  <circle cx="256" cy="216" r="96" fill="#fff8f0"/>
+
+  <!-- Burger -->
+  <g transform="translate(0 6)">
+    <!-- Top bun -->
+    <path fill="#f59e0b"
+      d="M180 210c8-38 40-64 76-64s68 26 76 64z"/>
+
+    <!-- Sesame seeds -->
+    <circle cx="220" cy="178" r="4" fill="#fff"/>
+    <circle cx="250" cy="168" r="4" fill="#fff"/>
+    <circle cx="285" cy="178" r="4" fill="#fff"/>
+
+    <!-- Lettuce -->
+    <path fill="#22c55e"
+      d="M180 220c12-8 24 8 36 0s24-8 36 0 24 8 36 0 24-8 36 0v12H180z"/>
+
+    <!-- Patty -->
+    <rect x="180" y="232" width="152" height="20" rx="10" fill="#7c2d12"/>
+
+    <!-- Bottom bun -->
+    <rect x="180" y="258" width="152" height="28" rx="14" fill="#f59e0b"/>
+  </g>
+</svg>
