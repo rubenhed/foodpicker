@@ -6,11 +6,30 @@ import Map from "../components/Map";
 import RestaurantCard from "../components/RestaurantCard";
 import { Share, Check } from "lucide-react";
 
-function distance(lat1: number, lng1: number, lat2: number, lng2: number) {
-  return Math.sqrt((lat1 - lat2) ** 2 + (lng1 - lng2) ** 2);
+function distanceMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(m: number) {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m)}m`;
 }
 
 const EMPTY_RESTAURANTS: HotPepperShop[] = [];
+
+type Tab = "map" | "list";
 
 export default function Room() {
   const { code } = useParams();
@@ -26,14 +45,21 @@ export default function Room() {
   const [range, setRange] = useState(2);
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<Tab>("map");
+  // Distances frozen at search time: restaurantId -> meters
+  const [distances, setDistances] = useState<Record<string, number>>({});
 
   const isHost = !!snapshot && snapshot.selfId === snapshot.hostId;
   const restaurants = snapshot?.searchResult?.results.shop ?? EMPTY_RESTAURANTS;
   const votes = useMemo(() => snapshot?.votes ?? {}, [snapshot?.votes]);
   const participants = snapshot?.participants ?? [];
 
+  const mapCenterRef = useRef<[number, number] | null>(null);
+
   const handleCenterChange = useCallback((lat: number, lng: number) => {
-    setMapCenter([lat, lng]);
+    const center: [number, number] = [lat, lng];
+    mapCenterRef.current = center;
+    setMapCenter(center);
   }, []);
 
   function handleCopy() {
@@ -42,16 +68,13 @@ export default function Room() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  // Sorted by frozen distance, computed once per search result
   const restaurantsByProximity = useMemo(
     () =>
-      mapCenter
-        ? [...restaurants].sort(
-            (a, b) =>
-              distance(mapCenter[0], mapCenter[1], a.lat, a.lng) -
-              distance(mapCenter[0], mapCenter[1], b.lat, b.lng),
-          )
-        : restaurants,
-    [restaurants, mapCenter],
+      [...restaurants].sort(
+        (a, b) => (distances[a.id] ?? Infinity) - (distances[b.id] ?? Infinity),
+      ),
+    [restaurants, distances],
   );
 
   const genres = useMemo(
@@ -79,7 +102,7 @@ export default function Room() {
     [restaurantsByProximity, votes],
   );
 
-  function sendSearch() {
+  const sendSearch = useCallback(() => {
     if (!isHost || !mapCenter || ws.current?.readyState !== WebSocket.OPEN)
       return;
     setIsSearching(true);
@@ -92,12 +115,12 @@ export default function Room() {
         lunch,
       }),
     );
-  }
+  }, [isHost, mapCenter, range, lunch]);
 
-  function sendVote(restaurantId: string) {
+  const sendVote = useCallback((restaurantId: string) => {
     if (ws.current?.readyState !== WebSocket.OPEN) return;
     ws.current.send(JSON.stringify({ type: MessageType.VOTE, restaurantId }));
-  }
+  }, []);
 
   const connect = useCallback(() => {
     const wsUrl = `${import.meta.env.VITE_WS_BASE}/room/${code}/ws?name=${encodeURIComponent(name)}`;
@@ -109,6 +132,22 @@ export default function Room() {
 
     socket.onmessage = (e) => {
       const msg = JSON.parse(e.data) as Partial<Snapshot>;
+
+      // Freeze distances at the moment a new search result arrives
+      if ("searchResult" in msg && msg.searchResult && mapCenterRef.current) {
+        const origin = mapCenterRef.current as [number, number];
+        const newDistances: Record<string, number> = {};
+        for (const shop of msg.searchResult.results.shop ?? []) {
+          newDistances[shop.id] = distanceMeters(
+            origin[0],
+            origin[1],
+            shop.lat,
+            shop.lng,
+          );
+        }
+        setDistances(newDistances);
+      }
+
       setSnapshot(
         (prev) =>
           ({
@@ -124,7 +163,6 @@ export default function Room() {
 
   useEffect(() => {
     connect();
-
     const handleVisibility = () => {
       if (
         document.visibilityState === "visible" &&
@@ -133,17 +171,84 @@ export default function Room() {
         connect();
       }
     };
-
     document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       ws.current?.close();
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [connect]);
 
+  const tabBtn = (t: Tab, label: string, count?: number) => (
+    <button
+      onClick={() => setTab(t)}
+      className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+        tab === t
+          ? "bg-white text-stone-900 shadow-sm"
+          : "text-stone-500 hover:text-stone-700"
+      }`}
+    >
+      {label}
+      {count !== undefined ? ` (${count})` : ""}
+    </button>
+  );
+
+  const restaurantList = (
+    list: HotPepperShop[],
+    emptyMsg: string,
+    compact = false,
+  ) => (
+    <div className="flex flex-col gap-2 overflow-y-auto flex-1 min-h-0">
+      {list.length === 0 && (
+        <p className="text-stone-400 text-sm">{emptyMsg}</p>
+      )}
+      {list.map((r) => (
+        <RestaurantCard
+          key={r.id}
+          r={r}
+          votes={votes}
+          selfVote={votes[snapshot?.selfId ?? ""] ?? null}
+          onVote={() => sendVote(r.id)}
+          onMouseEnter={() => setHoveredId(r.id)}
+          onMouseLeave={() => setHoveredId(null)}
+          distance={formatDistance(distances[r.id] ?? 0)}
+          compact={compact}
+        />
+      ))}
+    </div>
+  );
+
+  const genreFilter = (
+    <div className="flex flex-wrap gap-2 shrink-0">
+      <button
+        onClick={() => setSelectedGenre(null)}
+        className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+          selectedGenre === null
+            ? "bg-orange-500 text-white"
+            : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+        }`}
+      >
+        All
+      </button>
+      {genres.map((genre) => (
+        <button
+          key={genre}
+          onClick={() =>
+            setSelectedGenre(genre === selectedGenre ? null : genre)
+          }
+          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            selectedGenre === genre
+              ? "bg-orange-500 text-white"
+              : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+          }`}
+        >
+          {genre}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="h-screen flex flex-col bg-stone-50 text-stone-900 p-4 gap-4 overflow-hidden">
+    <div className="h-screen flex flex-col bg-stone-50 text-stone-900 p-4 gap-3 overflow-hidden">
       {/* Header */}
       <div className="flex justify-between items-start gap-2">
         <div className="flex items-center gap-3 shrink-0">
@@ -204,7 +309,6 @@ export default function Room() {
           >
             {isSearching ? "Searching..." : "Search Nearby"}
           </button>
-
           <select
             value={range}
             onChange={(e) => setRange(Number(e.target.value))}
@@ -216,7 +320,6 @@ export default function Room() {
               </option>
             ))}
           </select>
-
           <label className="flex items-center gap-2 text-sm text-stone-600 cursor-pointer">
             <input
               type="checkbox"
@@ -229,97 +332,91 @@ export default function Room() {
         </div>
       )}
 
-      {/* Map */}
-      <div
-        className="w-full rounded-xl overflow-hidden shrink-0 border border-stone-200"
-        style={{ height: "50vh" }}
-      >
-        <Map
-          snapshot={snapshot}
-          onCenterChange={handleCenterChange}
-          hoveredId={hoveredId}
-          range={range}
-        />
+      {/* Mobile tabs — now just Map / List */}
+      <div className="md:hidden flex gap-1 bg-stone-100 p-1 rounded-xl shrink-0">
+        {tabBtn("map", "Map")}
+        {tabBtn("list", "List", filteredRestaurantsByProximity.length)}
       </div>
 
-      {/* Genre filter */}
-      {genres.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setSelectedGenre(null)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              selectedGenre === null
-                ? "bg-orange-500 text-white"
-                : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-            }`}
-          >
-            All
-          </button>
-          {genres.map((genre) => (
-            <button
-              key={genre}
-              onClick={() =>
-                setSelectedGenre(genre === selectedGenre ? null : genre)
-              }
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                selectedGenre === genre
-                  ? "bg-orange-500 text-white"
-                  : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-              }`}
-            >
-              {genre}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Restaurant lists */}
-      <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0">
-        <div className="flex flex-col flex-1 min-h-0">
-          <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider">
-            Nearby ({filteredRestaurantsByProximity.length})
-          </h2>
-          <div className="flex flex-col gap-2 overflow-y-auto flex-1 min-h-0">
-            {filteredRestaurantsByProximity.length === 0 && (
-              <p className="text-stone-400 text-sm">
-                {isHost
-                  ? "Move the map and hit Search."
-                  : "Waiting for host to search."}
-              </p>
-            )}
-            {filteredRestaurantsByProximity.map((r) => (
-              <RestaurantCard
-                key={r.id}
-                r={r}
-                votes={votes}
-                selfVote={votes[snapshot?.selfId ?? ""] ?? null}
-                onVote={() => sendVote(r.id)}
-                onMouseEnter={() => setHoveredId(r.id)}
-                onMouseLeave={() => setHoveredId(null)}
-              />
-            ))}
+      {/* Mobile content */}
+      <div className="md:hidden flex flex-col flex-1 min-h-0">
+        {tab === "map" && (
+          <div className="rounded-xl overflow-hidden border border-stone-200 flex-1">
+            <Map
+              snapshot={snapshot}
+              onCenterChange={handleCenterChange}
+              hoveredId={hoveredId}
+              range={range}
+            />
           </div>
+        )}
+
+        {tab === "list" && (
+          <div className="flex flex-col flex-1 min-h-0 gap-3">
+            {genres.length > 0 && genreFilter}
+
+            {/* Nearby — takes ~2/3 */}
+            <div className="flex flex-col min-h-0" style={{ flex: 2 }}>
+              <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
+                Nearby ({filteredRestaurantsByProximity.length})
+              </h2>
+              {restaurantList(
+                filteredRestaurantsByProximity,
+                isHost
+                  ? "Move the map and hit Search."
+                  : "Waiting for host to search.",
+              )}
+            </div>
+
+            {/* Votes — takes ~1/3 */}
+            {currentVotes.length > 0 && (
+              <div className="flex flex-col min-h-0" style={{ flex: 1 }}>
+                <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
+                  Votes ({currentVotes.length})
+                </h2>
+                {restaurantList(currentVotes, "No votes yet.", true)}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Desktop layout */}
+      <div className="hidden md:flex flex-col flex-1 min-h-0 gap-4">
+        <div
+          className="w-full rounded-xl overflow-hidden shrink-0 border border-stone-200"
+          style={{ height: "50vh" }}
+        >
+          <Map
+            snapshot={snapshot}
+            onCenterChange={handleCenterChange}
+            hoveredId={hoveredId}
+            range={range}
+          />
         </div>
 
-        <div className="flex flex-col md:w-96 shrink-0 min-h-0 max-h-48 md:max-h-none">
-          <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider">
-            Votes ({currentVotes.length})
-          </h2>
-          <div className="flex flex-col gap-2 overflow-y-auto flex-1 min-h-0">
-            {currentVotes.length === 0 && (
-              <p className="text-stone-400 text-sm">No votes yet.</p>
+        {genres.length > 0 && genreFilter}
+
+        <div className="flex gap-4 flex-1 min-h-0">
+          {/* Nearby — flex-2 */}
+          <div className="flex flex-col min-h-0" style={{ flex: 2 }}>
+            <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
+              Nearby ({filteredRestaurantsByProximity.length})
+            </h2>
+            {restaurantList(
+              filteredRestaurantsByProximity,
+              isHost
+                ? "Move the map and hit Search."
+                : "Waiting for host to search.",
             )}
-            {currentVotes.map((r) => (
-              <RestaurantCard
-                key={r.id}
-                r={r}
-                votes={votes}
-                selfVote={votes[snapshot?.selfId ?? ""] ?? null}
-                onVote={() => sendVote(r.id)}
-                onMouseEnter={() => setHoveredId(r.id)}
-                onMouseLeave={() => setHoveredId(null)}
-              />
-            ))}
+          </div>
+
+          {/* Votes — flex-1, capped */}
+          <div className="flex flex-col min-h-0" style={{ flex: 1 }}>
+            <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
+              Votes ({currentVotes.length})
+            </h2>
+            {restaurantList(currentVotes, "No votes yet.", true)}
           </div>
         </div>
       </div>

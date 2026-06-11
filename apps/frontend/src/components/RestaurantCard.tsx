@@ -7,6 +7,8 @@ type Props = {
   onVote: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
+  distance: string;
+  compact: boolean;
 };
 
 export default function RestaurantCard({
@@ -16,6 +18,8 @@ export default function RestaurantCard({
   onVote,
   onMouseEnter,
   onMouseLeave,
+  distance,
+  compact,
 }: Props) {
   const voteCount = Object.values(votes).filter((id) => id === r.id).length;
   const isVoted = selfVote === r.id;
@@ -35,9 +39,14 @@ export default function RestaurantCard({
         >
           {r.name}
         </a>
-        <p className="text-stone-400 text-xs mt-0.5">{r.genre.name}</p>
+        {!compact && (
+          <p className="text-stone-400 text-xs mt-0.5">{r.genre.name}</p>
+        )}
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full font-medium">
+          {distance}
+        </span>
         {voteCount > 0 && (
           <span className="text-stone-400 text-xs">{voteCount}</span>
         )}
