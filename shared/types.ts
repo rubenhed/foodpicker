@@ -1,3 +1,4 @@
+// types.ts
 import { MessageType } from "./constants";
 
 export type HotPepperShop = {
@@ -19,22 +20,20 @@ export type HotPepperResponse = {
   };
 };
 
-export type StateSnapshotMessage = {
-  type: typeof MessageType.STATE_SNAPSHOT;
-  selfId: string;
-  hostId: string | null;
-  searchResult: HotPepperResponse | null;
-  votes: Record<string, string>;
-  participantIds: string[];
+export type Participant = {
+  userId: string;
+  name: string;
 };
 
-export type ServerMessage = StateSnapshotMessage;
+export type Snapshot = {
+  selfId: string;
+  hostId: string | null;
+  searchResult?: HotPepperResponse | null;
+  votes: Record<string, string>;
+  participants: Participant[];
+};
 
 export type ClientMessage =
-  | {
-      type: typeof MessageType.JOIN;
-      name: string;
-    }
   | {
       type: typeof MessageType.SEARCH;
       lat: number;

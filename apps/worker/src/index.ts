@@ -11,7 +11,7 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 app.use("*", cors());
 
-// Create a new room, returns { roomCode, hostId, wsUrl }
+// Get a randomized room code
 app.post("/room", async (c) => {
   const code = Math.random().toString(36).slice(2, 6).toUpperCase();
   return c.json({
@@ -21,6 +21,7 @@ app.post("/room", async (c) => {
 });
 
 // WebSocket upgrade — forwards to the Room Durable Object
+// Lazily creates the room one fetch if it doesnt exist already
 app.get("/room/:code/ws", async (c) => {
   const id = c.env.ROOM.idFromName(c.req.param("code"));
   const stub = c.env.ROOM.get(id);

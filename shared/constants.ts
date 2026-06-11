@@ -1,9 +1,5 @@
+// constants.ts
 export const MessageType = {
-  // server → client
-  STATE_SNAPSHOT: "state_snapshot",
-
-  // client → server
-  JOIN: "join",
   SEARCH: "search",
   VOTE: "vote",
 } as const;
