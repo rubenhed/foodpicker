@@ -46,20 +46,15 @@ export default function Room() {
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("map");
-  // Distances frozen at search time: restaurantId -> meters
-  const [distances, setDistances] = useState<Record<string, number>>({});
 
   const isHost = !!snapshot && snapshot.selfId === snapshot.hostId;
-  const restaurants = snapshot?.searchResult?.results.shop ?? EMPTY_RESTAURANTS;
+  const searchDetails = snapshot?.searchDetails ?? null;
+  const restaurants = searchDetails?.result.results.shop ?? EMPTY_RESTAURANTS;
   const votes = useMemo(() => snapshot?.votes ?? {}, [snapshot?.votes]);
   const participants = snapshot?.participants ?? [];
 
-  const mapCenterRef = useRef<[number, number] | null>(null);
-
   const handleCenterChange = useCallback((lat: number, lng: number) => {
-    const center: [number, number] = [lat, lng];
-    mapCenterRef.current = center;
-    setMapCenter(center);
+    setMapCenter([lat, lng]);
   }, []);
 
   function handleCopy() {
@@ -68,7 +63,18 @@ export default function Room() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // Sorted by frozen distance, computed once per search result
+  // Distances derived from search origin in snapshot — stable, no ref needed
+  const distances = useMemo(() => {
+    if (!searchDetails) return {} as Record<string, number>;
+    const { lat, lng } = searchDetails.origin;
+    return Object.fromEntries(
+      searchDetails.result.results.shop.map((r) => [
+        r.id,
+        distanceMeters(lat, lng, r.lat, r.lng),
+      ]),
+    );
+  }, [searchDetails]);
+
   const restaurantsByProximity = useMemo(
     () =>
       [...restaurants].sort(
@@ -132,29 +138,13 @@ export default function Room() {
 
     socket.onmessage = (e) => {
       const msg = JSON.parse(e.data) as Partial<Snapshot>;
-
-      // Freeze distances at the moment a new search result arrives
-      if ("searchResult" in msg && msg.searchResult && mapCenterRef.current) {
-        const origin = mapCenterRef.current as [number, number];
-        const newDistances: Record<string, number> = {};
-        for (const shop of msg.searchResult.results.shop ?? []) {
-          newDistances[shop.id] = distanceMeters(
-            origin[0],
-            origin[1],
-            shop.lat,
-            shop.lng,
-          );
-        }
-        setDistances(newDistances);
-      }
-
       setSnapshot(
         (prev) =>
           ({
             ...(prev ?? {}),
             ...msg,
-            searchResult:
-              "searchResult" in msg ? msg.searchResult : prev?.searchResult,
+            searchDetails:
+              "searchDetails" in msg ? msg.searchDetails : prev?.searchDetails,
           }) as Snapshot,
       );
       setIsSearching(false);
@@ -332,7 +322,7 @@ export default function Room() {
         </div>
       )}
 
-      {/* Mobile tabs — now just Map / List */}
+      {/* Mobile tabs */}
       <div className="md:hidden flex gap-1 bg-stone-100 p-1 rounded-xl shrink-0">
         {tabBtn("map", "Map")}
         {tabBtn("list", "List", filteredRestaurantsByProximity.length)}
@@ -350,12 +340,9 @@ export default function Room() {
             />
           </div>
         )}
-
         {tab === "list" && (
           <div className="flex flex-col flex-1 min-h-0 gap-3">
             {genres.length > 0 && genreFilter}
-
-            {/* Nearby — takes ~2/3 */}
             <div className="flex flex-col min-h-0" style={{ flex: 2 }}>
               <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
                 Nearby ({filteredRestaurantsByProximity.length})
@@ -367,8 +354,6 @@ export default function Room() {
                   : "Waiting for host to search.",
               )}
             </div>
-
-            {/* Votes — takes ~1/3 */}
             {currentVotes.length > 0 && (
               <div className="flex flex-col min-h-0" style={{ flex: 1 }}>
                 <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
@@ -394,11 +379,8 @@ export default function Room() {
             range={range}
           />
         </div>
-
         {genres.length > 0 && genreFilter}
-
         <div className="flex gap-4 flex-1 min-h-0">
-          {/* Nearby — flex-2 */}
           <div className="flex flex-col min-h-0" style={{ flex: 2 }}>
             <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
               Nearby ({filteredRestaurantsByProximity.length})
@@ -410,8 +392,6 @@ export default function Room() {
                 : "Waiting for host to search.",
             )}
           </div>
-
-          {/* Votes — flex-1, capped */}
           <div className="flex flex-col min-h-0" style={{ flex: 1 }}>
             <h2 className="text-xs font-semibold text-stone-400 mb-2 uppercase tracking-wider shrink-0">
               Votes ({currentVotes.length})

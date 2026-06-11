@@ -25,10 +25,16 @@ export type Participant = {
   name: string;
 };
 
+export type SearchDetails = {
+  origin: { lat: number; lng: number };
+  range: number;
+  result: HotPepperResponse;
+};
+
 export type Snapshot = {
   selfId: string;
   hostId: string | null;
-  searchResult?: HotPepperResponse | null;
+  searchDetails?: SearchDetails | null; // replaces searchResult
   votes: Record<string, string>;
   participants: Participant[];
 };

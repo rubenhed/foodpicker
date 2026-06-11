@@ -1,10 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
-import type { HotPepperResponse } from "@shared/types";
+import type { HotPepperResponse, SearchDetails } from "@shared/types";
 import { MessageType } from "@shared/constants";
 
 const HOTPEPPER_API_URL =
   "http://webservice.recruit.co.jp/hotpepper/gourmet/v1/";
-const SEARCH_RESULT = "searchResult";
+const SEARCH_INFO_KEY = "searchDetails";
 
 type Session = {
   userId: string;
@@ -19,16 +19,15 @@ type Env = {
 
 export class Room extends DurableObject<Env> {
   sessions = new Map<WebSocket, Session>();
-  searchResult: HotPepperResponse | null = null;
+  searchDetails: SearchDetails | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
     ctx.blockConcurrencyWhile(async () => {
-      const storedSearchResult =
-        await this.ctx.storage.get<string>(SEARCH_RESULT);
-      if (storedSearchResult) {
-        this.searchResult = JSON.parse(storedSearchResult);
+      const stored = await this.ctx.storage.get<string>(SEARCH_INFO_KEY);
+      if (stored) {
+        this.searchDetails = JSON.parse(stored);
       }
 
       for (const ws of this.ctx.getWebSockets()) {
@@ -65,7 +64,7 @@ export class Room extends DurableObject<Env> {
 
     this.broadcast({
       ...this.getSessionsPayload(),
-      searchResult: this.searchResult,
+      searchDetails: this.searchDetails,
     });
 
     return new Response(null, { status: 101, webSocket: client });
@@ -143,13 +142,18 @@ export class Room extends DurableObject<Env> {
 
     if (!data) return;
 
-    this.searchResult = data;
+    this.searchDetails = {
+      origin: { lat: msg.lat, lng: msg.lng },
+      range: msg.range,
+      result: data,
+    };
+
     await this.ctx.storage.put(
-      SEARCH_RESULT,
-      JSON.stringify(this.searchResult),
+      SEARCH_INFO_KEY,
+      JSON.stringify(this.searchDetails),
     );
 
-    this.broadcast({ searchResult: this.searchResult });
+    this.broadcast({ searchDetails: this.searchDetails });
   }
 
   private async handleVote(ws: WebSocket, restaurantId: string) {
